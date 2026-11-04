@@ -15,7 +15,7 @@ jobs:
       - uses: actions/checkout@v4
         with:
           submodules: 'true'
-          fetch-depth: 3
+          fetch-depth: 10
       - name: Use the callbacks.R from master (keep the new test)
         if: matrix.code == 'master'
         run: git checkout a057843a -- R-package/R/callbacks.R && git diff --stat HEAD
@@ -55,12 +55,12 @@ jobs:
         continue-on-error: ${{ matrix.code == 'master' }}
         run: |
           cd R-package/tests/testthat
-          Rscript -e 'library(testthat); library(xgboost); r <- as.data.frame(test_file("test_callbacks.R", reporter = "summary")); print(r[, c("test", "nb", "failed", "skipped", "error")]); stopifnot(sum(r$failed) == 0, !any(r$error))'
+          Rscript -e 'library(testthat); library(xgboost); r <- as.data.frame(test_file("test_callbacks.R", reporter = "summary", package = "xgboost", load_package = "installed")); print(r[, c("test", "nb", "failed", "skipped", "error")]); stopifnot(sum(r$failed) == 0, !any(r$error))'
       - name: Full R test suite
-        if: matrix.code == 'fix'
+        continue-on-error: ${{ matrix.code == 'master' }}
         run: |
           cd R-package/tests
-          Rscript -e 'library(testthat); library(xgboost); r <- as.data.frame(test_dir("testthat", reporter = "summary", stop_on_failure = FALSE)); cat("files:", length(unique(r$file)), "tests:", nrow(r), "failed:", sum(r$failed), "errors:", sum(r$error), "skipped:", sum(r$skipped), "\n"); print(r[r$failed > 0 | r$error, c("file", "test")]); stopifnot(sum(r$failed) == 0, !any(r$error))'
+          Rscript -e 'library(testthat); library(xgboost); r <- as.data.frame(test_dir("testthat", reporter = "summary", stop_on_failure = FALSE, package = "xgboost", load_package = "installed")); cat("files:", length(unique(r$file)), "tests:", nrow(r), "failed:", sum(r$failed), "errors:", sum(r$error), "skipped:", sum(r$skipped), "\n"); print(r[r$failed > 0 | r$error, c("file", "test")]); stopifnot(sum(r$failed) == 0, !any(r$error))'
       - name: lintr (repo config)
         if: matrix.code == 'fix'
         run: Rscript ops/script/lint_r.R "$(pwd)/R-package"
