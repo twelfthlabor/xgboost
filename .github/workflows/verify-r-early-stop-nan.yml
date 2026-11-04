@@ -1,0 +1,66 @@
+name: verify R early stopping NaN
+on:
+  push:
+    branches: [verify/r-early-stop-nan]
+permissions:
+  contents: read
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        code: [fix, master]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: 'true'
+          fetch-depth: 3
+      - name: Use the callbacks.R from master (keep the new test)
+        if: matrix.code == 'master'
+        run: git checkout a057843a -- R-package/R/callbacks.R && git diff --stat HEAD
+      - uses: r-lib/actions/setup-r@v2
+        with:
+          r-version: release
+          use-public-rspm: true
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install R dependencies
+        run: Rscript -e 'install.packages(c("Matrix", "data.table", "jsonlite", "testthat", "lintr", "titanic", "ggplot2", "igraph", "Ckmeans.1d.dp", "vcd", "float", "DiagrammeR", "knitr", "rmarkdown", "RhpcBLASctl"))'
+      - name: Build and install the R package
+        run: |
+          rm .github/workflows/verify-r-early-stop-nan.yml
+          python ops/script/test_r_package.py --task=pack
+          CMAKE_BUILD_PARALLEL_LEVEL=4 R CMD INSTALL xgboost > install.log 2>&1 || (tail -50 install.log; exit 1)
+          tail -3 install.log
+      - name: Reproducer from issue 12642
+        continue-on-error: ${{ matrix.code == 'master' }}
+        run: |
+          cat > repro.R <<'RS'
+          library(xgboost)
+          set.seed(1)
+          x <- matrix(rnorm(2000), ncol = 2)
+          y <- pmax(1, 100 + 80 * x[, 1] + rnorm(1000, sd = 50))
+          dtrain <- xgb.DMatrix(x, label = y)
+          bst <- xgb.train(
+            params = list(eta = 0.5, max_depth = 4, subsample = 0.1, lambda = 0.01, eval_metric = "rmsle"),
+            data = dtrain, nrounds = 20, evals = list(train = dtrain), early_stopping_rounds = 5
+          )
+          print(attributes(bst)$evaluation_log)
+          cat("best_iteration:", xgb.attr(bst, "best_iteration"), "best_score:", xgb.attr(bst, "best_score"), "\n")
+          RS
+          Rscript repro.R
+      - name: test_callbacks.R
+        continue-on-error: ${{ matrix.code == 'master' }}
+        run: |
+          cd R-package/tests/testthat
+          Rscript -e 'library(testthat); library(xgboost); r <- as.data.frame(test_file("test_callbacks.R", reporter = "summary")); print(r[, c("test", "nb", "failed", "skipped", "error")]); stopifnot(sum(r$failed) == 0, !any(r$error))'
+      - name: Full R test suite
+        if: matrix.code == 'fix'
+        run: |
+          cd R-package/tests
+          Rscript -e 'library(testthat); library(xgboost); r <- as.data.frame(test_dir("testthat", reporter = "summary", stop_on_failure = FALSE)); cat("files:", length(unique(r$file)), "tests:", nrow(r), "failed:", sum(r$failed), "errors:", sum(r$error), "skipped:", sum(r$skipped), "\n"); print(r[r$failed > 0 | r$error, c("file", "test")]); stopifnot(sum(r$failed) == 0, !any(r$error))'
+      - name: lintr (repo config)
+        if: matrix.code == 'fix'
+        run: Rscript ops/script/lint_r.R "$(pwd)/R-package"
