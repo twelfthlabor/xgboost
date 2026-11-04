@@ -285,6 +285,49 @@ test_that("early stopping xgb.train works", {
   expect_equal(xgb.attr(loaded, "best_iteration"), xgb.attr(bst, "best_iteration"))
 })
 
+test_that("early stopping treats a NaN score as no improvement", {
+  # returns NaN in the rounds listed in 'nan_rounds', and the error otherwise
+  nan_metric <- function(nan_rounds) {
+    round <- 0
+    function(preds, dtrain) {
+      round <<- round + 1
+      value <- if (round %in% nan_rounds) NaN else err(getinfo(dtrain, "label"), preds)
+      list(metric = "nan_error", value = value)
+    }
+  }
+  params <- c(params, list(learning_rate = 0.3))
+
+  set.seed(11)
+  expect_silent(
+    bst <- xgb.train(params, dtrain, nrounds = 20, evals = list(train = dtrain),
+                     custom_metric = nan_metric(c(2, 3)), maximize = FALSE,
+                     early_stopping_rounds = 3, verbose = 0)
+  )
+  log <- attributes(bst)$evaluation_log
+  expect_true(all(is.na(log$train_nan_error[2:3])))
+  best <- xgb.attr(bst, "best_iteration") + 1
+  expect_false(best %in% c(2, 3))
+  expect_equal(xgb.attr(bst, "best_score"), min(log$train_nan_error, na.rm = TRUE))
+
+  # every score is NaN: stops after 'early_stopping_rounds' rounds without improvement
+  set.seed(11)
+  expect_silent(
+    bst <- xgb.train(params, dtrain, nrounds = 20, evals = list(train = dtrain),
+                     custom_metric = nan_metric(1:20), maximize = FALSE,
+                     early_stopping_rounds = 3, verbose = 0)
+  )
+  expect_equal(xgb.get.num.boosted.rounds(bst), 4)
+  expect_equal(xgb.attr(bst, "best_iteration"), 0)
+
+  set.seed(11)
+  expect_silent(
+    cv <- xgb.cv(params, dtrain, nfold = 3, nrounds = 20,
+                 custom_metric = function(preds, dtrain) list(metric = "nan_error", value = NaN),
+                 maximize = FALSE, early_stopping_rounds = 3, verbose = 0)
+  )
+  expect_equal(nrow(cv$evaluation_log), 4)
+})
+
 test_that("early stopping using a specific metric works", {
   set.seed(11)
   expect_output(

@@ -717,8 +717,10 @@ xgb.cb.early.stop <- function(
       }
 
       score <- iter_feval[env$metric_idx]
-      if ((env$maximize && score > env$best_score) ||
-          (!env$maximize && score < env$best_score)) {
+      # A NaN score is not an improvement, it counts towards the stopping rounds.
+      if (!is.na(score) &&
+          ((env$maximize && score > env$best_score) ||
+             (!env$maximize && score < env$best_score))) {
 
         env$best_score <- score
         env$best_iteration <- iteration
