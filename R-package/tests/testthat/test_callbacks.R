@@ -295,7 +295,10 @@ test_that("early stopping treats a NaN score as no improvement", {
       list(metric = "nan_error", value = value)
     }
   }
-  params <- c(params, list(learning_rate = 0.3))
+  # no eval_metric, it cannot be combined with custom_metric
+  params <- xgb.params(
+    objective = "binary:logistic", max_depth = 2, nthread = n_threads, learning_rate = 0.3
+  )
 
   set.seed(11)
   expect_silent(
