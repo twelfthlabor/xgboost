@@ -1,0 +1,37 @@
+name: verify checkpoint dir
+on:
+  push:
+    branches: [verify/checkpoint-dir]
+permissions:
+  contents: read
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        code: [fix, master]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: 'true'
+          fetch-depth: 5
+      - name: Use master's callback.py (keep the new test)
+        if: matrix.code == 'master'
+        run: git checkout 86dc2c125d -- python-package/xgboost/callback.py
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Build and install xgboost from source
+        run: |
+          pip install -q scikit-learn pandas pytest hypothesis
+          CMAKE_BUILD_PARALLEL_LEVEL=4 pip install -q ./python-package
+      - name: test_callback.py
+        continue-on-error: ${{ matrix.code == 'master' }}
+        run: cd tests/python && python -m pytest test_callback.py -q -p no:cacheprovider 2>&1 | tail -15
+      - name: ruff and mypy on callback.py
+        if: matrix.code == 'fix'
+        run: |
+          pip install -q ruff mypy
+          ruff check python-package/xgboost/callback.py tests/python/test_callback.py
+          cd python-package && mypy xgboost/callback.py --ignore-missing-imports 2>&1 | tail -3
